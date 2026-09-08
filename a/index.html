@@ -6,26 +6,29 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="../icon.png" />
 
-    <!-- Probe A: one unconditioned tag, and a manifest with NO theme_color at all. If the bar
-         is purple here, the manifest's presence is what was suppressing the tag in probe 1. -->
+    <!-- Probe A: the same plain tag, but the manifest names no colour at all. If B came out
+         green and this one comes out purple, the manifest is what suppresses the tag. -->
     <meta name="theme-color" content="#8800cc" />
 
     <title>probe A — no manifest theme_color</title>
     <style>
       body {
         margin: 0;
-        padding: 1.25rem;
-        font: 16px/1.5 system-ui, sans-serif;
+        padding: 1.25rem 1.25rem 3rem;
+        font: 16px/1.6 system-ui, sans-serif;
         background: #222;
         color: #eee;
       }
+      h1 {
+        font-size: 1.3rem;
+      }
       button {
         font: inherit;
-        padding: 0.7rem 1rem;
+        padding: 0.8rem 1rem;
         margin: 0.25rem 0.25rem 0 0;
-        background: #00aa44;
+        background: #555;
         color: #fff;
-        border: 0;
+        border: 1px solid #888;
         border-radius: 6px;
       }
       pre {
@@ -35,35 +38,59 @@
         word-break: break-all;
         font-size: 0.8rem;
       }
-      b {
-        color: #ffee88;
+      .key {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+      }
+      .key td {
+        border: 1px solid #555;
+        padding: 0.5rem;
+      }
+      .sw {
+        display: inline-block;
+        width: 2.5em;
+        height: 1.4em;
+        vertical-align: -0.3em;
+        border: 1px solid #999;
       }
     </style>
   </head>
   <body>
     <h1>Probe A</h1>
-    <p>
-      Manifest has <b>no theme_color</b>. One plain <code>theme-color</code> tag, purple
-      <b>#8800cc</b>.
-    </p>
-    <p>
-      Bar purple → the tag works, and probe 1's manifest was overriding it.<br />
-      Bar grey/black/white → the tag is ignored here too.
-    </p>
-    <button onclick="paint('#00aa44')">Make it green</button>
+    <p>manifest names <b>no colour at all</b>. The page's one plain theme-color tag says <b>purple</b>.</p>
+
+    <table class="key">
+      <tr>
+        <td><span class="sw" style="background: #777"></span></td>
+        <td>grey, black or white — <b>nothing</b> won, the platform picked its own
+      </tr>
+      <tr>
+        <td><span class="sw" style="background: #8800cc"></span></td>
+        <td>purple — the <b>meta tag</b> won</td>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background: #ff7700"></span></td>
+        <td>orange — a <b>runtime write</b> won</td>
+      </tr>
+    </table>
+
+    <button onclick="paint('#ff7700')">Write orange into the tag</button>
     <button onclick="location.reload()">Reload</button>
     <pre id="state"></pre>
+
     <script>
+      const tag = document.querySelector('meta[name="theme-color"]');
       const show = () =>
         (document.getElementById("state").textContent = [
           `standalone: ${matchMedia("(display-mode: standalone)").matches}`,
           `system dark: ${matchMedia("(prefers-color-scheme: dark)").matches}`,
-          `theme-color now: ${document.querySelector('meta[name="theme-color"]').content}`,
+          `theme-color now: ${tag.content}`,
           ``,
           navigator.userAgent,
         ].join("\n"));
       const paint = (c) => {
-        document.querySelector('meta[name="theme-color"]').content = c;
+        tag.content = c;
         show();
       };
       show();
