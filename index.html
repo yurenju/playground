@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icon.png" />
+
+    <!-- Three theme-color declarations, each a colour nothing else in this page uses, so the
+         system bar names its own winner. The two media-conditioned ones come first: a browser
+         that honours `media` picks whichever matches and ignores the unconditioned one below. -->
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#001a66" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffee88" />
+    <meta name="theme-color" content="#8800cc" id="plain" />
+
+    <title>theme-color probe</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 1.25rem;
+        font: 16px/1.5 system-ui, sans-serif;
+        background: #222;
+        color: #eee;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1rem 0;
+      }
+      td,
+      th {
+        border: 1px solid #555;
+        padding: 0.4rem;
+        text-align: left;
+        font-size: 0.9rem;
+      }
+      .sw {
+        display: inline-block;
+        width: 1.2em;
+        height: 1.2em;
+        vertical-align: -0.25em;
+        border: 1px solid #888;
+      }
+      button {
+        font: inherit;
+        padding: 0.7rem 1rem;
+        margin: 0.25rem 0.25rem 0.25rem 0;
+        background: #00aa44;
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+      }
+      code {
+        background: #000;
+        padding: 0 0.3em;
+      }
+      #state {
+        background: #000;
+        padding: 0.6rem;
+        white-space: pre-wrap;
+        font-family: monospace;
+        font-size: 0.85rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>theme-color probe</h1>
+    <p>Install this page to the home screen, then open it from there. Read the system bar colour.</p>
+
+    <table>
+      <tr>
+        <th>Bar colour</th>
+        <th>Winner</th>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background: #ff00aa"></span> magenta</td>
+        <td>manifest <code>theme_color</code> only</td>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background: #001a66"></span> navy</td>
+        <td>meta, <code>prefers-color-scheme: dark</code></td>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background: #ffee88"></span> pale yellow</td>
+        <td>meta, <code>prefers-color-scheme: light</code></td>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background: #8800cc"></span> purple</td>
+        <td>meta with no <code>media</code></td>
+      </tr>
+      <tr>
+        <td><span class="sw" style="background: #00aa44"></span> green</td>
+        <td>a runtime write from the button below</td>
+      </tr>
+    </table>
+
+    <h2>Runtime writes</h2>
+    <button onclick="writeAll('#00aa44')">Set every tag green</button>
+    <button onclick="dropMedia()">Delete both media tags</button>
+    <button onclick="location.reload()">Reload</button>
+
+    <h2>What the page sees</h2>
+    <div id="state"></div>
+
+    <script>
+      const show = () => {
+        const tags = [...document.querySelectorAll('meta[name="theme-color"]')].map(
+          (m) => `  media=${JSON.stringify(m.media || null)} content=${m.content}`,
+        );
+        document.getElementById("state").textContent = [
+          `standalone: ${matchMedia("(display-mode: standalone)").matches}`,
+          `system dark: ${matchMedia("(prefers-color-scheme: dark)").matches}`,
+          `service worker: ${!!navigator.serviceWorker?.controller}`,
+          "meta tags:",
+          ...tags,
+        ].join("\n");
+      };
+
+      function writeAll(colour) {
+        document
+          .querySelectorAll('meta[name="theme-color"]')
+          .forEach((m) => m.setAttribute("content", colour));
+        show();
+      }
+
+      function dropMedia() {
+        document.querySelectorAll('meta[name="theme-color"][media]').forEach((m) => m.remove());
+        show();
+      }
+
+      show();
+      matchMedia("(prefers-color-scheme: dark)").addEventListener("change", show);
+      navigator.serviceWorker?.register("sw.js");
+    </script>
+  </body>
+</html>
