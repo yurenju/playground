@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="../icon.png" />
+
+    <!-- Probe B: one unconditioned tag against a manifest that names a different colour. This is
+         the exact shape Tidemarks has, with the media tags of probe 1 taken out of the way. -->
+    <meta name="theme-color" content="#8800cc" />
+
+    <title>probe B — manifest magenta, one plain tag</title>
+    <style>
+      body {
+        margin: 0;
+        padding: 1.25rem;
+        font: 16px/1.5 system-ui, sans-serif;
+        background: #222;
+        color: #eee;
+      }
+      button {
+        font: inherit;
+        padding: 0.7rem 1rem;
+        margin: 0.25rem 0.25rem 0 0;
+        background: #00aa44;
+        color: #fff;
+        border: 0;
+        border-radius: 6px;
+      }
+      pre {
+        background: #000;
+        padding: 0.6rem;
+        white-space: pre-wrap;
+        word-break: break-all;
+        font-size: 0.8rem;
+      }
+      b {
+        color: #ffee88;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Probe B</h1>
+    <p>
+      Manifest theme_color is magenta <b>#ff00aa</b>. One plain <code>theme-color</code> tag, purple
+      <b>#8800cc</b>. Same shape as Tidemarks.
+    </p>
+    <p>
+      Bar purple → the tag beats the manifest, so probe 1's media tags were what broke it.<br />
+      Bar magenta → the manifest wins even against a single plain tag.
+    </p>
+    <button onclick="paint('#00aa44')">Make it green</button>
+    <button onclick="location.reload()">Reload</button>
+    <pre id="state"></pre>
+    <script>
+      const show = () =>
+        (document.getElementById("state").textContent = [
+          `standalone: ${matchMedia("(display-mode: standalone)").matches}`,
+          `system dark: ${matchMedia("(prefers-color-scheme: dark)").matches}`,
+          `theme-color now: ${document.querySelector('meta[name="theme-color"]').content}`,
+          ``,
+          navigator.userAgent,
+        ].join("\n"));
+      const paint = (c) => {
+        document.querySelector('meta[name="theme-color"]').content = c;
+        show();
+      };
+      show();
+      navigator.serviceWorker?.register("sw.js");
+    </script>
+  </body>
+</html>
