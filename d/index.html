@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="../icon.png" />
+
+    <!-- Probe D is probe C with the manifest's colour taken away. The status bar now follows
+         the system, and this tag still tracks the mock page's surface — so the two agree only
+         while the page's theme and the system's agree. -->
+    <meta name="theme-color" content="#f4eee2" />
+
+    <title>probe D — no manifest colour, bar follows the system</title>
+    <style>
+      :root {
+        --page: #f4eee2;
+        --ink: #1a1815;
+        --muted: #6b6459;
+        --line: #ddd4c4;
+        --button: #24395c;
+        --on-button: #f4eee2;
+      }
+      body[data-theme="dark"] {
+        --page: #16202b;
+        --ink: #e8e4dc;
+        --muted: #8d97a3;
+        --line: #2c3a48;
+        --button: #7ea6ce;
+        --on-button: #16202b;
+      }
+      body {
+        margin: 0;
+        padding: 1.5rem 1.25rem 4rem;
+        font: 16px/1.6 system-ui, sans-serif;
+        background: var(--page);
+        color: var(--ink);
+      }
+      h1 {
+        font: italic 2rem/1 Georgia, serif;
+        margin: 0 0 1.5rem;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.9rem 0;
+        border-bottom: 1px solid var(--line);
+      }
+      .cover {
+        width: 34px;
+        height: 48px;
+        background: var(--line);
+        flex: none;
+      }
+      .grow {
+        flex: 1;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .cta {
+        background: var(--button);
+        color: var(--on-button);
+        border: 0;
+        border-radius: 4px;
+        padding: 0.6rem 1rem;
+        font: inherit;
+      }
+      .toggle {
+        margin-top: 2rem;
+        padding: 0.9rem 1.2rem;
+        font: inherit;
+        background: none;
+        color: var(--ink);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+      p.note {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+    </style>
+  </head>
+  <body data-theme="light">
+    <h1>tidemarks</h1>
+
+    <div class="row">
+      <div class="cover"></div>
+      <div class="grow">
+        <div>俠客行（全集）</div>
+        <div class="sub">讀到 【越女劍】</div>
+      </div>
+      <button class="cta">繼續讀</button>
+    </div>
+    <div class="row">
+      <div class="cover"></div>
+      <div class="grow">
+        <div>九歌112年散文選</div>
+        <div class="sub">讀到八天七夜</div>
+      </div>
+    </div>
+
+    <button class="toggle" onclick="flip()">Switch theme</button>
+
+    <p class="note">
+      The manifest names no colour, so the status bar follows <b>the system</b>. Switch the page
+      theme without touching the system: watch the seam appear, and watch the clock and battery.
+    </p>
+
+    <script>
+      const tag = document.querySelector('meta[name="theme-color"]');
+      function flip() {
+        const dark = document.body.dataset.theme === "dark";
+        document.body.dataset.theme = dark ? "light" : "dark";
+        tag.content = dark ? "#f4eee2" : "#16202b";
+      }
+      navigator.serviceWorker?.register("sw.js");
+    </script>
+  </body>
+</html>
