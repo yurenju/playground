@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Pen / Touch Probe</title>
+<style>
+  /* e-ink：純黑白、無漸層、無動畫 */
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none;
+    background: #fff; color: #000;
+    font: 15px/1.45 ui-monospace, "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  }
+  body { display: flex; flex-direction: column; }
+
+  #pad { flex: 1 1 55%; position: relative; border-bottom: 3px solid #000; min-height: 0; }
+  #pad canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+  #hint {
+    position: absolute; top: 8px; left: 10px; font-size: 13px; color: #555; pointer-events: none;
+  }
+
+  #info { flex: 1 1 45%; overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 8px 10px 24px; min-height: 0; }
+
+  .bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  button {
+    font: inherit; padding: 6px 12px; background: #fff; color: #000;
+    border: 2px solid #000; border-radius: 0; cursor: pointer;
+  }
+  button:active { background: #000; color: #fff; }
+
+  h2 { font-size: 13px; margin: 12px 0 4px; text-transform: uppercase; letter-spacing: .08em; }
+  h2:first-child { margin-top: 0; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  td, th { border: 1px solid #999; padding: 2px 5px; text-align: left; vertical-align: top; }
+  th { background: #eee; font-weight: 700; }
+  td.k { width: 42%; color: #333; }
+  .num { font-variant-numeric: tabular-nums; }
+  .no { color: #777; }
+  .yes { font-weight: 700; }
+  .wrap { overflow-x: auto; }
+  #ua { font-size: 11px; color: #444; word-break: break-all; }
+</style>
+</head>
+<body>
+
+<div id="pad">
+  <canvas id="c"></canvas>
+  <div id="hint">在這裡用筆 / 手指畫，下面會顯示偵測到的資訊</div>
+</div>
+
+<div id="info">
+  <div class="bar">
+    <button id="clear">清除畫布</button>
+    <button id="reset">歸零統計</button>
+    <button id="copy">複製報告</button>
+    <span id="rate" class="num">0 Hz</span>
+  </div>
+
+  <h2>目前這一筆事件</h2>
+  <div class="wrap"><table id="live"></table></div>
+
+  <h2>累計觀察到的能力（重點）</h2>
+  <div class="wrap"><table id="observed"></table></div>
+
+  <h2>API 支援（載入時查）</h2>
+  <div class="wrap"><table id="caps"></table></div>
+
+  <h2>UA</h2>
+  <div id="ua"></div>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- canvas ----------
+  const cv = document.getElementById('c');
+  const ctx = cv.getContext('2d');
+  let dpr = 1;
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    const r = cv.getBoundingClientRect();
+    cv.width = Math.round(r.width * dpr);
+    cv.height = Math.round(r.height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.lineCap = ctx.lineJoin = 'round';
+  }
+  new ResizeObserver(resize).observe(cv);
+  resize();
+
+  const last = new Map(); // pointerId -> {x,y}
+
+  function draw(e, prev) {
+    const r = cv.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top;
+    // 橡皮擦端（buttons bit 5）或 eraser pointerType -> 擦除
+    const erasing = e.pointerType === 'eraser' || (e.buttons & 32) !== 0;
+    ctx.globalCompositeOperation = erasing ? 'destination-out' : 'source-over';
+    // 壓力沒有變化的裝置會固定 0.5，線寬就會是一條等寬線，這本身就是結論
+    const w = erasing ? 24 : 0.7 + (e.pressure || 0.5) * 7;
+    ctx.strokeStyle = e.pointerType === 'touch' ? '#777' : '#000';
+    ctx.lineWidth = w;
+    ctx.beginPath();
+    ctx.moveTo(prev ? prev.x : x, prev ? prev.y : y);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    return { x, y };
+  }
+
+  // ---------- 統計 ----------
+  const F = ['pressure','tangentialPressure','tiltX','tiltY','twist','width','height','altitudeAngle','azimuthAngle'];
+  let stats, rawUpdateSeen, rateWin;
+
+  function reset() {
+    stats = new Map();     // pointerType -> 該型別的觀察
+    rawUpdateSeen = 0;
+    rateWin = [];
+    render();
+  }
+
+  function bucket(type) {
+    if (!stats.has(type)) {
+      const b = { events: 0, hover: 0, maxCoalesced: 0, maxPredicted: 0, buttons: new Set(), maxPoints: 0, f: {} };
+      for (const k of F) b.f[k] = { min: Infinity, max: -Infinity, values: new Set(), present: false };
+      stats.set(type, b);
+    }
+    return stats.get(type);
+  }
+
+  function record(e, isRaw) {
+    const b = bucket(e.pointerType || '(empty)');
+    b.events++;
+    if (e.buttons === 0 && e.type === 'pointermove') b.hover++;
+    b.buttons.add(e.buttons);
+    for (const k of F) {
+      const v = e[k];
+      if (typeof v !== 'number' || !isFinite(v)) continue;
+      const s = b.f[k];
+      s.present = true;
+      if (v < s.min) s.min = v;
+      if (v > s.max) s.max = v;
+      if (s.values.size < 200) s.values.add(Math.round(v * 1e4) / 1e4);
+    }
+    if (isRaw) rawUpdateSeen++;
+    const now = performance.now();
+    rateWin.push(now);
+    while (rateWin.length && now - rateWin[0] > 1000) rateWin.shift();
+  }
+
+  // ---------- 事件 ----------
+  const opt = { passive: false };
+
+  cv.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    try { cv.setPointerCapture(e.pointerId); } catch (_) {}
+    record(e, false);
+    last.set(e.pointerId, draw(e, null));
+    live(e);
+  }, opt);
+
+  cv.addEventListener('pointermove', e => {
+    e.preventDefault();
+    const b = bucket(e.pointerType || '(empty)');
+    const co = e.getCoalescedEvents ? e.getCoalescedEvents() : [];
+    if (co.length > b.maxCoalesced) b.maxCoalesced = co.length;
+    if (e.getPredictedEvents) {
+      const p = e.getPredictedEvents();
+      if (p.length > b.maxPredicted) b.maxPredicted = p.length;
+    }
+    b.maxPoints = Math.max(b.maxPoints, last.size);
+
+    const list = co.length ? co : [e];
+    for (const ev of list) record(ev, false);
+
+    if (e.buttons !== 0 || e.pointerType === 'eraser') {
+      let prev = last.get(e.pointerId) || null;
+      for (const ev of list) prev = draw(ev, prev);
+      last.set(e.pointerId, prev);
+    }
+    live(e, co.length);
+  }, opt);
+
+  for (const t of ['pointerup','pointercancel','pointerleave']) {
+    cv.addEventListener(t, e => { last.delete(e.pointerId); record(e, false); live(e); }, opt);
+  }
+
+  // pointerrawupdate：有些裝置會用更高頻率丟出來，用來對比原生取樣率
+  cv.addEventListener('pointerrawupdate', e => record(e, true), opt);
+
+  cv.addEventListener('contextmenu', e => e.preventDefault());
+
+  // ---------- 畫面 ----------
+  const fmt = v => typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(4)) : String(v);
+  const rows = (el, arr) => {
+    el.innerHTML = arr.map(([k, v]) => `<tr><td class="k">${k}</td><td class="num">${v}</td></tr>`).join('');
+  };
+
+  const liveEl = document.getElementById('live');
+  function live(e, coalesced) {
+    rows(liveEl, [
+      ['type', e.type],
+      ['pointerType', `<b>${e.pointerType || '(empty)'}</b>`],
+      ['pointerId', e.pointerId],
+      ['isPrimary', e.isPrimary],
+      ['buttons', `${e.buttons}${(e.buttons & 32) ? ' (橡皮擦端)' : (e.buttons & 2) ? ' (側鍵)' : ''}`],
+      ['pressure', fmt(e.pressure)],
+      ['tangentialPressure', fmt(e.tangentialPressure)],
+      ['tiltX / tiltY', `${fmt(e.tiltX)} / ${fmt(e.tiltY)}`],
+      ['twist', fmt(e.twist)],
+      ['width / height', `${fmt(e.width)} / ${fmt(e.height)}`],
+      ['altitude / azimuth', `${fmt(e.altitudeAngle)} / ${fmt(e.azimuthAngle)}`],
+      ['client x,y', `${e.clientX.toFixed(1)}, ${e.clientY.toFixed(1)}`],
+      ['同時按下的指標數', last.size],
+      ['本次 coalesced', coalesced === undefined ? '-' : coalesced],
+    ]);
+    dirty = true;
+  }
+
+  const obsEl = document.getElementById('observed');
+  function renderObserved() {
+    if (!stats.size) {
+      obsEl.innerHTML = '<tr><td class="no">還沒有任何事件，先在上面畫一筆</td></tr>';
+      return;
+    }
+    const types = [...stats.keys()];
+    const head = `<tr><th>觀察項目</th>${types.map(t => `<th>${t}</th>`).join('')}</tr>`;
+    const line = (label, f) =>
+      `<tr><td class="k">${label}</td>${types.map(t => `<td class="num">${f(stats.get(t))}</td>`).join('')}</tr>`;
+
+    // 「有幾個不同的值」才是關鍵：只有 1 個代表這個欄位是假的
+    const varies = key => b => {
+      const s = b.f[key];
+      if (!s.present) return '<span class="no">無此欄位</span>';
+      const n = s.values.size;
+      if (n <= 1) return `<span class="no">固定 ${fmt(s.min)}</span>`;
+      return `<span class="yes">${n} 種值</span><br>${fmt(s.min)} ~ ${fmt(s.max)}`;
+    };
+
+    obsEl.innerHTML = head +
+      line('事件數', b => b.events) +
+      line('懸空移動 (未接觸)', b => b.hover ? `<span class="yes">${b.hover}</span>` : '<span class="no">0</span>') +
+      line('壓力 pressure', varies('pressure')) +
+      line('傾斜 tiltX', varies('tiltX')) +
+      line('傾斜 tiltY', varies('tiltY')) +
+      line('旋轉 twist', varies('twist')) +
+      line('側推 tangentialPressure', varies('tangentialPressure')) +
+      line('接觸面積 width', varies('width')) +
+      line('接觸面積 height', varies('height')) +
+      line('altitudeAngle', varies('altitudeAngle')) +
+      line('azimuthAngle', varies('azimuthAngle')) +
+      line('出現過的 buttons 值', b => [...b.buttons].sort((x, y) => x - y).join(', ')) +
+      line('單次 coalesced 上限', b => b.maxCoalesced || '<span class="no">0</span>') +
+      line('單次 predicted 上限', b => b.maxPredicted || '<span class="no">0</span>') +
+      line('同時指標數上限', b => b.maxPoints);
+  }
+
+  function renderCaps() {
+    const has = (o, k) => o && k in o;
+    const y = v => v ? '<span class="yes">有</span>' : '<span class="no">沒有</span>';
+    const PE = window.PointerEvent && PointerEvent.prototype;
+    rows(document.getElementById('caps'), [
+      ['PointerEvent', y(!!window.PointerEvent)],
+      ['TouchEvent', y(!!window.TouchEvent)],
+      ['navigator.maxTouchPoints', navigator.maxTouchPoints],
+      ['getCoalescedEvents()', y(has(PE, 'getCoalescedEvents'))],
+      ['getPredictedEvents()', y(has(PE, 'getPredictedEvents'))],
+      ['pointerrawupdate', y('onpointerrawupdate' in window)],
+      ['altitudeAngle / azimuthAngle', y(has(PE, 'altitudeAngle'))],
+      ['Touch.force', y(window.Touch && 'force' in Touch.prototype)],
+      ['touch-action: none', y(CSS.supports('touch-action', 'none'))],
+      ['pointer: fine (媒體查詢)', y(matchMedia('(pointer: fine)').matches)],
+      ['any-pointer: fine', y(matchMedia('(any-pointer: fine)').matches)],
+      ['hover: hover', y(matchMedia('(hover: hover)').matches)],
+      ['devicePixelRatio', dpr],
+      ['螢幕 (CSS px)', `${screen.width} x ${screen.height}`],
+      ['收到 pointerrawupdate 次數', `<span id="rawn">0</span>`],
+    ]);
+  }
+
+  let dirty = true;
+  function render() { renderObserved(); dirty = false; }
+
+  // 統計表每 250ms 更新一次就好，e-ink 刷得越少越好
+  setInterval(() => {
+    const now = performance.now();
+    while (rateWin.length && now - rateWin[0] > 1000) rateWin.shift();
+    document.getElementById('rate').textContent = rateWin.length + ' Hz';
+    const rn = document.getElementById('rawn');
+    if (rn) rn.textContent = rawUpdateSeen;
+    if (dirty) render();
+  }, 250);
+
+  // ---------- 按鈕 ----------
+  document.getElementById('clear').onclick = () => {
+    ctx.save(); ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, cv.width, cv.height); ctx.restore();
+  };
+  document.getElementById('reset').onclick = reset;
+  document.getElementById('copy').onclick = async (ev) => {
+    const lines = ['# Pen/Touch probe report', new Date().toISOString(), navigator.userAgent, ''];
+    for (const el of document.querySelectorAll('#info table')) {
+      for (const tr of el.rows) lines.push([...tr.cells].map(c => c.innerText.replace(/\n/g, ' ')).join(' | '));
+      lines.push('');
+    }
+    const text = lines.join('\n');
+    try { await navigator.clipboard.writeText(text); ev.target.textContent = '已複製'; }
+    catch { const t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); document.execCommand('copy'); t.remove(); ev.target.textContent = '已複製'; }
+    setTimeout(() => ev.target.textContent = '複製報告', 1500);
+  };
+
+  document.getElementById('ua').textContent = navigator.userAgent;
+  renderCaps();
+  reset();
+  live({ type: '-', pointerType: '', pointerId: 0, isPrimary: false, buttons: 0, pressure: 0, tangentialPressure: 0, tiltX: 0, tiltY: 0, twist: 0, width: 0, height: 0, clientX: 0, clientY: 0 });
+})();
+</script>
+</body>
+</html>
